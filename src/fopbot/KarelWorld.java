@@ -1,13 +1,14 @@
 package fopbot;
 
+import javax.swing.JFrame;
 import java.awt.Image;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Array;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
-
-import javax.swing.JFrame;
+import java.util.List;
 
 public class KarelWorld {
 
@@ -24,7 +25,7 @@ public class KarelWorld {
 	private JFrame guiFrame;
 	private GuiPanel guiGp;
 
-	private LinkedList<FieldEntity>[][] entities;
+	private List<FieldEntity>[][] entities;
 
 	private HashMap<Class<? extends Robot>, HashMap<String, Image[]>> robotImages;
 	private HashMap<String, HashMap<String, Image[]>> robotImagesById;
@@ -49,11 +50,11 @@ public class KarelWorld {
 				getClass().getResourceAsStream("/res/trianglebot.png"), 0, 0);
 		robotImagesById = new HashMap<String, HashMap<String, Image[]>>();
 
-		LinkedList<FieldEntity> lst = new LinkedList<FieldEntity>();
-		entities = (LinkedList<FieldEntity>[][]) Array.newInstance(lst.getClass(), width, height);
+		List<FieldEntity> lst = Collections.synchronizedList(new LinkedList<>());
+		entities = (List<FieldEntity>[][]) Array.newInstance(lst.getClass(), width, height);
 		for (int i = 0; i < width; i++) {
 			for (int j = 0; j < height; j++) {
-				entities[i][j] = new LinkedList<FieldEntity>();
+				entities[i][j] = Collections.synchronizedList(new LinkedList<>());
 			}
 		}
 	}
@@ -91,22 +92,28 @@ public class KarelWorld {
 	/**
 	 * @param x
 	 * @param y
-	 * @return a list of all field entities at field (x,y)
+	 * @return a copy of the list of all field entities at field (x,y)
 	 */
-	protected LinkedList<FieldEntity> getFieldEntities(int x, int y) {
-		return entities[x][y];
+	protected List<FieldEntity> getFieldEntities(int x, int y) {
+		LinkedList<FieldEntity> list;
+		synchronized (entities[x][y]) {
+			list = new LinkedList<>(entities[x][y]);
+		}
+		return list;
 	}
 
 	/**
 	 * @return a list of all field entities in the world
 	 */
 	public LinkedList<FieldEntity> getAllFieldEntities() {
-		LinkedList<FieldEntity> all = new LinkedList<FieldEntity>();
+		LinkedList<FieldEntity> all = new LinkedList<>();
 		for (int i = 0; i < width; i++) {
 			for (int j = 0; j < height; j++) {
-				LinkedList<FieldEntity> field = entities[i][j];
-				if (field.size() > 0) {
-					all.addAll(field);
+				synchronized (entities[i][j]) {
+					List<FieldEntity> field = entities[i][j];
+					if (field.size() > 0) {
+						all.addAll(field);
+					}
 				}
 			}
 		}
@@ -119,9 +126,11 @@ public class KarelWorld {
 	 * @return true if a block is in field (x,y)
 	 */
 	protected boolean isBlockInField(int x, int y) {
-		for (FieldEntity ce : entities[x][y]) {
-			if (ce instanceof Block) {
-				return true;
+		synchronized (entities[x][y]) {
+			for (FieldEntity ce : entities[x][y]) {
+				if (ce instanceof Block) {
+					return true;
+				}
 			}
 		}
 		return false;
@@ -135,11 +144,13 @@ public class KarelWorld {
 	 *         horizontal
 	 */
 	protected boolean isWallInField(int x, int y, boolean horizontal) {
-		for (FieldEntity ce : entities[x][y]) {
-			if (ce instanceof Wall) {
-				Wall w = (Wall) ce;
-				if (w.isHorizontal() == horizontal) {
-					return true;
+		synchronized (entities[x][y]) {
+			for (FieldEntity ce : entities[x][y]) {
+				if (ce instanceof Wall) {
+					Wall w = (Wall) ce;
+					if (w.isHorizontal() == horizontal) {
+						return true;
+					}
 				}
 			}
 		}
@@ -152,9 +163,11 @@ public class KarelWorld {
 	 * @return true if at least one coin is in field (x,y)
 	 */
 	protected boolean isCoinInField(int x, int y) {
-		for (FieldEntity ce : entities[x][y]) {
-			if (ce instanceof Coin) {
-				return true;
+		synchronized (entities[x][y]) {
+			for (FieldEntity ce : entities[x][y]) {
+				if (ce instanceof Coin) {
+					return true;
+				}
 			}
 		}
 		return false;
@@ -167,11 +180,13 @@ public class KarelWorld {
 	 * @return true if another robot is in field (x,y)
 	 */
 	protected boolean isAnotherRobotInField(int x, int y, Robot r) {
-		for (FieldEntity ce : entities[x][y]) {
-			if (ce instanceof Robot) {
-				Robot a = (Robot) ce;
-				if (a != r) {
-					return true;
+		synchronized (entities[x][y]) {
+			for (FieldEntity ce : entities[x][y]) {
+				if (ce instanceof Robot) {
+					Robot a = (Robot) ce;
+					if (a != r) {
+						return true;
+					}
 				}
 			}
 		}
@@ -185,21 +200,28 @@ public class KarelWorld {
 	 *         coin got removed
 	 */
 	protected boolean pickCoin(int x, int y) {
-		LinkedList<FieldEntity> field = entities[x][y];
-		for (FieldEntity ce : field) {
-			if (ce instanceof Coin) {
-				// if coins already placed in this field, decrease number
-				Coin c = (Coin) ce;
-				if (c.getCount() > 1) {
-					c.setCount(c.getCount() - 1);
-				} else {
-					field.remove(ce);
+		Coin foundCoin = null;
+
+		synchronized (entities[x][y]) {
+			for (FieldEntity ce : entities[x][y]) {
+				if (ce instanceof Coin) {
+					foundCoin = (Coin) ce;
+					break;
 				}
-				triggerUpdate();
-				return true;
 			}
 		}
-		return false;
+
+		if (foundCoin != null) {
+			if (foundCoin.getCount() > 1) {
+				foundCoin.setCount(foundCoin.getCount() - 1);
+			} else {
+				entities[x][y].remove(foundCoin);
+			}
+			triggerUpdate();
+			return true;
+		} else {
+			return false;
+		}
 	}
 
 	/**
@@ -217,19 +239,25 @@ public class KarelWorld {
 			throw new RuntimeException("Number of coins must be greater than 0!");
 		}
 
-		LinkedList<FieldEntity> field = entities[x][y];
-		for (FieldEntity ce : field) {
-			if (ce instanceof Coin) {
-				// if coins already placed in this field, increase number
-				Coin c = (Coin) ce;
-				c.setCount(c.getCount() + numberOfCoins);
-				triggerUpdate();
-				return;
+		Coin foundCoin = null;
+
+		synchronized (entities[x][y]) {
+			for (FieldEntity ce : entities[x][y]) {
+				if (ce instanceof Coin) {
+					foundCoin = (Coin) ce;
+					break;
+				}
 			}
 		}
-		// else place first coin
-		Coin c = new Coin(x, y, numberOfCoins);
-		field.add(c);
+
+		if (foundCoin != null) {
+			// if coins already placed in this field, increase number
+			foundCoin.setCount(foundCoin.getCount() + numberOfCoins);
+		} else {
+			// else place first coin
+			Coin c = new Coin(x, y, numberOfCoins);
+			entities[x][y].add(c);
+		}
 		triggerUpdate();
 	}
 
@@ -241,11 +269,13 @@ public class KarelWorld {
 	 * @param oldY
 	 */
 	protected void updateRobotField(Robot r, int oldX, int oldY) {
-		for (int i = 0; i < entities[oldX][oldY].size(); i++) {
-			if (entities[oldX][oldY].get(i) == r) {
-				entities[oldX][oldY].remove(i);
-				entities[r.getX()][r.getY()].add(r);
-				return;
+		synchronized (entities[oldX][oldY]) {
+			for (int i = 0; i < entities[oldX][oldY].size(); i++) {
+				if (entities[oldX][oldY].get(i) == r) {
+					entities[oldX][oldY].remove(i);
+					entities[r.getX()][r.getY()].add(r);
+					return;
+				}
 			}
 		}
 	}
@@ -260,14 +290,15 @@ public class KarelWorld {
 		checkXCoordinate(x);
 		checkYCoordinate(y);
 
-		LinkedList<FieldEntity> field = entities[x][y];
-		for (FieldEntity ce : field) {
-			if (ce instanceof Block) {
-				return;
+		synchronized (entities[x][y]) {
+			for (FieldEntity ce : entities[x][y]) {
+				if (ce instanceof Block) {
+					return;
+				}
 			}
 		}
 		Block b = new Block(x, y);
-		field.add(b);
+		entities[x][y].add(b);
 		triggerUpdate();
 	}
 
@@ -277,8 +308,7 @@ public class KarelWorld {
 	 * @param r
 	 */
 	public void addRobot(Robot r) {
-		LinkedList<FieldEntity> field = entities[r.getX()][r.getY()];
-		field.add(r);
+		entities[r.getX()][r.getY()].add(r);
 		r.setId(Integer.toString(robotCount));
 		robotCount++;
 		triggerUpdate();
@@ -297,17 +327,18 @@ public class KarelWorld {
 		checkXCoordinate(x);
 		checkYCoordinate(y);
 
-		LinkedList<FieldEntity> field = entities[x][y];
-		for (FieldEntity ce : field) {
-			if (ce instanceof Wall) {
-				Wall cew = (Wall) ce;
-				if (cew.isHorizontal() == horizontal) {
-					return;
+		synchronized (entities[x][y]) {
+			for (FieldEntity ce : entities[x][y]) {
+				if (ce instanceof Wall) {
+					Wall cew = (Wall) ce;
+					if (cew.isHorizontal() == horizontal) {
+						return;
+					}
 				}
 			}
 		}
 		Wall w = new Wall(x, y, horizontal);
-		field.add(w);
+		entities[x][y].add(w);
 		triggerUpdate();
 	}
 
